@@ -1,0 +1,13 @@
+Flask
+Werkzeug
+flask-cors
+pymongo
+dotenv
+pandas
+certifi
+numpy
+scikit-learn
+osmnx
+networkx
+geopy
+bson
