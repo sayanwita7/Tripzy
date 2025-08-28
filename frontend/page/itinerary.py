@@ -109,8 +109,10 @@ def itinerary_page():
             """
             if item.get("description"):
                 html += f"<p style='margin:0.3rem 0; color:#eee;'>{item['description']}</p>"
+            if item.get("spot_type"):
+                html += f"<p style='margin:0.3rem 0;'>🏷️  Spot Type: {item['spot_type']}</p>"
             if item.get("top_activities"):
-                html += f"<p style='margin:0.3rem 0; color:#4da6ff;'>✨ Activities: {item['top_activities']}</p>"
+                html += f"<p style='margin:0.3rem 0;'>✨ Activities: {item['top_activities']}</p>"
             if item.get("images"):
                 html += "<div style='display:flex; gap:0.5rem; margin-top:0.5rem;'>"
                 for img in item["images"][:5]: 
