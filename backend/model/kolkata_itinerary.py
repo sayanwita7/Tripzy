@@ -4,6 +4,7 @@ import sys
 import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple
 import os
+import math
 import pandas as pd
 import numpy as np
 import random
@@ -15,10 +16,20 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 BUDGET_TO_INR = {"Low": 1000, "Mid": 3000, "Medium": 3000, "High": 5000}
-OSM_NETWORK_TYPE = "drive" 
+OSM_NETWORK_TYPE = "drive"     
 OSM_GRAPH_DIST = 10000         
 GEOCODE_SLEEP = 1.0           
 NOMINATIM_USER_AGENT = "kolkata_itinerary_planner_v1"
+
+OSM_EATERY_SEARCH_RADIUS_M = 1500
+OSM_EATERY_LIMIT_PER_MEAL = 6
+
+ANCHORS = {
+    "airport":  (22.6540, 88.4467),  # NSCBI Airport
+    "howrah":   (22.5850, 88.3426),  # Howrah Jn
+    "sealdah":  (22.5665, 88.3710),  # Sealdah Jn
+    "esplanade":(22.5678, 88.3516),  # Esplanade Bus/Metro area
+}
 
 
 class KolkataItineraryGenerator:
@@ -65,6 +76,8 @@ class KolkataItineraryGenerator:
         self._hotel_coord: Optional[Tuple[float, float]] = None
         self._geolocator: Optional[Nominatim] = None
 
+        self._used_restaurants_global: set = set()
+
     def _norm(self, s: Any) -> str:
         if pd.isna(s):
             return ""
@@ -81,15 +94,16 @@ class KolkataItineraryGenerator:
     def _safe_info(self, df: pd.DataFrame, name: str, source_type: str) -> (str, str):
         name_col = self._first_col(df, ["Name", "Spot", "Place", "Mall", "Market"])
         if not name_col:
-            return "", ""
+            return f"(No description available in {source_type} data)", f"(No activities listed for {source_type})",  f"(No spot type listed for {source_type})"
 
         normalized_name = self._norm(name)
         cand = df[df[name_col].map(self._norm) == normalized_name]
         if cand.empty:
-            return "", ""
+            return f"(Information for '{name}' not found in {source_type} data)", f"(Information for '{name}' not found in {source_type} data)",  f"(Information for '{name}' not found in {source_type} data)"
 
-        desc = ""
-        acts = ""
+        desc = f"(Description not available in {source_type} data)"
+        acts = f"(Activities not listed for {source_type})"
+        spot = f"(Spot Type not listed for {source_type})"
 
         desc_cols = ["Description", "Details", "Info", "About"]
         desc_col = self._first_col(df, desc_cols)
@@ -101,7 +115,12 @@ class KolkataItineraryGenerator:
         if acts_col and pd.notna(cand[acts_col].iloc[0]) and str(cand[acts_col].iloc[0]).strip():
             acts = str(cand[acts_col].iloc[0]).strip()
 
-        return desc, acts
+        spot_cols = ["Spot Type"]
+        spot_col = self._first_col(df, spot_cols)
+        if spot_col and pd.notna(cand[spot_col].iloc[0]) and str(cand[spot_col].iloc[0]).strip():
+            spot = str(cand[spot_col].iloc[0]).strip()
+
+        return desc, acts, spot
 
     def _parse_spots(self, spots_cell: Any) -> List[Dict[str, Any]]:
         if pd.isna(spots_cell) or self._norm(spots_cell) == "":
@@ -235,6 +254,14 @@ class KolkataItineraryGenerator:
             return f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(name)}&query_place_id={lat},{lon}"
         except Exception:
             return f"https://www.google.com/maps/search/{urllib.parse.quote_plus(name)}"
+
+    def _haversine_km(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6371.0
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlmb = math.radians(lon2 - lon1)
+        a = math.sin(dphi/2)*2 + math.cos(p1)*math.cos(p2)*math.sin(dlmb/2)*2
+        return 2 * R * math.asin(math.sqrt(a))
 
     def _choose_nearby_hotel(self, daily_budget: int, arrival_area: str) -> Optional[str]:
         if self.nearby_hotels_df is None or self.nearby_hotels_df.empty:
@@ -436,6 +463,120 @@ class KolkataItineraryGenerator:
         except Exception:
             return None
 
+    def _extract_place_coord(self, place_name: str) -> Optional[Tuple[float, float]]:
+        """Try to get coordinates for a place from tourist & shopping CSVs; fallback to geocode."""
+        # tourist_df
+        try:
+            lat_cols = [c for c in ["Latitude", "Lat", "latitude", "lat"] if c in self.tourist_df.columns]
+            lon_cols = [c for c in ["Longitude", "Lon", "Lng", "longitude", "lon"] if c in self.tourist_df.columns]
+            if lat_cols and lon_cols:
+                mask = self.tourist_df[self.tourist_name_col].map(self._norm) == self._norm(place_name)
+                if mask.any():
+                    r = self.tourist_df[mask].iloc[0]
+                    lat = r.get(lat_cols[0], None); lon = r.get(lon_cols[0], None)
+                    if pd.notna(lat) and pd.notna(lon):
+                        return (float(lat), float(lon))
+        except Exception:
+            pass
+        # shopping_df
+        try:
+            lat_cols = [c for c in ["Latitude", "Lat", "latitude", "lat"] if c in self.shopping_df.columns]
+            lon_cols = [c for c in ["Longitude", "Lon", "Lng", "longitude", "lon"] if c in self.shopping_df.columns]
+            if lat_cols and lon_cols:
+                mask = self.shopping_df[self.shopping_name_col].map(self._norm) == self._norm(place_name)
+                if mask.any():
+                    r = self.shopping_df[mask].iloc[0]
+                    lat = r.get(lat_cols[0], None); lon = r.get(lon_cols[0], None)
+                    if pd.notna(lat) and pd.notna(lon):
+                        return (float(lat), float(lon))
+        except Exception:
+            pass
+        # geocode fallback
+        return self._geolocate(place_name)
+
+    def _osm_geometries_from_point(self, center: Tuple[float, float], dist_m: int, tags: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        """
+        Wrapper to handle OSMnx API across versions.
+        """
+        try:
+            # Newer OSMnx (>=1.3): geometries_from_point
+            return ox.geometries_from_point(center, tags=tags, dist=dist_m)
+        except Exception:
+            try:
+                # Older alias: features_from_point
+                return ox.features_from_point(center, tags=tags, dist=dist_m)  # type: ignore[attr-defined]
+            except Exception:
+                return None
+
+    def _find_osm_eateries_near(self, center: Tuple[float, float], radius_m: int,
+                                limit: int = OSM_EATERY_LIMIT_PER_MEAL) -> List[Dict[str, Any]]:
+        """
+        Query OSM for eateries near a coordinate.
+        """
+        if center is None:
+            return []
+
+        tags = {
+            "amenity": ["restaurant", "cafe", "fast_food", "food_court"]
+        }
+        try:
+            gdf = self._osm_geometries_from_point(center, radius_m, tags)
+            if gdf is None or gdf.empty:
+                return []
+
+            # prefer nodes with names; fallback to unnamed skipped
+            # obtain centroids for polygons
+            gdf = gdf.copy()
+            if "name" not in gdf.columns:
+                gdf["name"] = None
+            gdf = gdf[~gdf["name"].isna()]  # keep named only
+            if gdf.empty:
+                return []
+
+            # Get lat/lon for each feature
+            coords = []
+            for idx, row in gdf.iterrows():
+                try:
+                    geom = row.geometry
+                    if geom is None:
+                        continue
+                    if geom.geom_type == "Point":
+                        lon = float(geom.x); lat = float(geom.y)
+                    else:
+                        c = geom.representative_point()  # robust centroid
+                        lon = float(c.x); lat = float(c.y)
+                    nm = str(row.get("name", "")).strip()
+                    if not nm:
+                        continue
+                    coords.append((nm, lat, lon))
+                except Exception:
+                    continue
+
+            # Simple distance sort from anchor center
+            def d_m(lat, lon):
+                return self._haversine_km(center[0], center[1], lat, lon)
+
+            coords = sorted(coords, key=lambda x: d_m(x[1], x[2]))
+
+            picks: List[Dict[str, Any]] = []
+            seen_local = set()
+            for nm, lat, lon in coords:
+                key = self._norm(nm)
+                if key in seen_local or key in self._used_restaurants_global:
+                    continue
+                dist_from_hotel = self._distance_from_hotel_km(nm, (lat, lon)) if self._osm_graph else None
+                picks.append({
+                    "name": nm,
+                    "distance_km_from_hotel": None if dist_from_hotel is None else float(dist_from_hotel),
+                    "maps": self._maps_place_url_from_coords(nm, lat, lon)
+                })
+                seen_local.add(key)
+                if len(picks) >= limit:
+                    break
+            return picks
+        except Exception:
+            return []
+
     def _collect_area_meal_places(self, df: pd.DataFrame, area_focus: Optional[str],
                                   budget_category: str, meal_col_name: str) -> List[str]:
         if meal_col_name not in df.columns:
@@ -504,7 +645,7 @@ class KolkataItineraryGenerator:
         return picks[:4]
 
     def get_single_hotel_recommendation(self, budget: str, arrivals: str) -> str:
-        if "Sealdah Railway Station" in arrivals and "Esplanade Bus Stand" in arrivals:
+        if ("Sealdah Railway Station") in arrivals or ("Esplanade Bus Stand" in arrivals):
             arrival_key= "Sealdah Railway Station/ Esplanade Bus Stand"
         else:
             arrival_key=arrivals
@@ -520,224 +661,132 @@ class KolkataItineraryGenerator:
         maps_link = self._maps_place_url_from_coords(hotel_name, lat, lon)
         return f"{hotel_name} ({budget} budget; Nearby: {arrivals})\n   Maps: {maps_link}"
 
-    def generate_itinerary(
-            self,
-            days: int,
-            budget_level:str,
-            user_budget_value: int,
-            group_type: str,
-            start_location: str,
-            transportation_mode: str,
-            arrival,
-            arrival_area: Optional[str] = None
-        ) -> Dict[str, Any]:
-            
-            user_budget_category = self._map_budget_to_category(user_budget_value)
-            arrival_area_guess = arrival_area or start_location or "Kolkata, India"
-            hotel_coord = self._get_hotel_coord(arrival_area_guess, user_budget_value)
-            
-            osm_ready = False
-            if hotel_coord:
-                osm_ready = self._init_osm_graph(hotel_coord, dist_meters=OSM_GRAPH_DIST, network_type=OSM_NETWORK_TYPE)
-
+    def generate_itinerary(self, days: int, user_budget_value: int, group_type: str, start_location: str, transportation_mode: str, arrival_area: Optional[str] = None) -> Dict[str, Any]:
+        user_budget_category = self._map_budget_to_category(user_budget_value)
+        arrival_area_guess = arrival_area or start_location or "Kolkata, India"
+        hotel_coord = self._get_hotel_coord(arrival_area_guess, user_budget_value)
+        osm_ready = False
+        if hotel_coord:
+            osm_ready = self._init_osm_graph(hotel_coord, dist_meters=OSM_GRAPH_DIST, network_type=OSM_NETWORK_TYPE)
+        day_rows = self.hotels_df.copy()
+        if "Group Type" in day_rows.columns:
+            day_rows = day_rows[day_rows["Group Type"].map(self._norm).str.contains(self._norm(group_type), na=False)]
+        if self.hotels_budget_col in day_rows.columns:
+            day_rows = day_rows[day_rows[self.hotels_budget_col].map(self._norm) == self._norm(user_budget_category)]
+        if day_rows.empty:
             day_rows = self.hotels_df.copy()
-
-            if "Group Type" in day_rows.columns:
-                day_rows = day_rows[day_rows["Group Type"].map(self._norm).str.contains(self._norm(group_type), na=False)]
-            if self.hotels_budget_col in day_rows.columns:
-                day_rows = day_rows[day_rows[self.hotels_budget_col].map(self._norm) == self._norm(user_budget_category)]
-
-            if day_rows.empty:
-                day_rows = self.hotels_df.copy()
-
-            day_rows = day_rows.head(days).reset_index(drop=True)
-
-            if day_rows.empty:
-                return {
-                    "meta": {
-                        "error": "No rows available to build itinerary. Check input CSVs."
-                    },
-                    "days": []
-                }
-
-            itinerary_obj: Dict[str, Any] = {
+        day_rows = day_rows.head(days).reset_index(drop=True)
+        if day_rows.empty:
+            return {
                 "meta": {
-                    "days": days,
-                    "budget_value_inr": user_budget_value,
-                    "budget_category": user_budget_category,
-                    "group_type": group_type,
-                    "start_location": start_location,
-                    "transportation_mode": transportation_mode,
-                    "arrival_area": arrival_area_guess,
-                    "osm_ready": osm_ready,
+                    "error": "No rows available to build itinerary. Check input CSVs."
                 },
                 "days": []
             }
-
-            for i, row in day_rows.iterrows():
-                day_num = i + 1
-                area = row.get("Area Focus", None)
-
-                spots = self._parse_spots(row.get("Spots (Order & Duration)", ""))
-                location_order = [start_location]
-
-                day_items: List[Dict[str, Any]] = []
-                for s in spots:
-                    nm = s["name"]
-                    kind = s["kind"]
-                    mins = s["minutes"]
-
-                    location_order.append(nm)
-                    place_coord = None
-                    try:
-                        lat_cols = [c for c in ["Latitude", "Lat", "latitude", "lat"] if c in self.tourist_df.columns]
-                        lon_cols = [c for c in ["Longitude", "Lon", "Lng", "longitude", "lon"] if c in self.tourist_df.columns]
-                        if lat_cols and lon_cols:
-                            mask = self.tourist_df[self.tourist_name_col].map(self._norm) == self._norm(nm)
-                            if mask.any():
-                                r = self.tourist_df[mask].iloc[0]
-                                lat = r.get(lat_cols[0], None); lon = r.get(lon_cols[0], None)
-                                if pd.notna(lat) and pd.notna(lon):
-                                    place_coord = (float(lat), float(lon))
-                    except Exception:
-                        place_coord = None
-
-                    dkm = None
-                    if osm_ready:
-                        dkm = self._distance_from_hotel_km(nm, place_coord)
-
-                    if kind == "shopping":
-                        desc, acts = self._safe_info(self.shopping_df, nm, "shopping data")
-                    elif kind in ("lunch", "dinner"):
-                        desc, acts = "", ""
-                    else:
-                        desc, acts = self._safe_info(self.tourist_df, nm, "tourist spot data")
-
-                    day_items.append({
-                        "type": kind,  # visit / shopping / lunch / dinner
-                        "name": nm,
-                        "duration_minutes": mins,
-                        "distance_km_from_hotel": dkm,
-                        "description": desc,
-                        "top_activities": acts
-                    })  # --------- Meal Plan ----------
-                alloc = self._parse_meal_alloc(row.get("Meals Time Allocation", ""))
-                meals_block: Dict[str, Any] = {}
-                for meal_label in ["Breakfast", "Lunch", "Snacks", "Dinner"]:
-                    minutes = alloc.get(meal_label, 0)
-                    suggestions = self._suggested_restaurants_for_meal(row, user_budget_category, meal_label)
-                    sugg_list: List[Dict[str, Any]] = []
-                    for rname in suggestions:
-                        rcoord = None
-                        try:
-                            lat_cols = [c for c in ["Latitude", "Lat", "latitude", "lat"] if c in self.hotels_df.columns]
-                            lon_cols = [c for c in ["Longitude", "Lon", "Lng", "longitude", "lon"] if c in self.hotels_df.columns]
-                            if lat_cols and lon_cols:
-                                mask = self.hotels_df[self.hotels_name_col].map(self._norm) == self._norm(rname)
-                                if mask.any():
-                                    r = self.hotels_df[mask].iloc[0]
-                                    lat = r.get(lat_cols[0], None); lon = r.get(lon_cols[0], None)
-                                    if pd.notna(lat) and pd.notna(lon):
-                                        rcoord = (float(lat), float(lon))
-                        except Exception:
-                            rcoord = None
-
-                        if rcoord is None:
-                            try:
-                                lat_cols = [c for c in ["Latitude", "Lat", "latitude", "lat"] if c in self.tourist_df.columns]
-                                lon_cols = [c for c in ["Longitude", "Lon", "Lng", "longitude", "lon"] if c in self.tourist_df.columns]
-                                if lat_cols and lon_cols:
-                                    mask = self.tourist_df[self.tourist_name_col].map(self._norm) == self._norm(rname)
-                                    if mask.any():
-                                        r = self.tourist_df[mask].iloc[0]
-                                        lat = r.get(lat_cols[0], None); lon = r.get(lon_cols[0], None)
-                                        if pd.notna(lat) and pd.notna(lon):
-                                            rcoord = (float(lat), float(lon))
-                            except Exception:
-                                rcoord = None
-
-                        dkm = self._distance_from_hotel_km(rname, rcoord) if osm_ready else None
-                        sugg_list.append({
-                            "name": rname,
-                            "distance_km_from_hotel": dkm
-                        })
-
-                    meals_block[meal_label] = {
-                        "allocated_minutes": minutes,
-                        "suggested_restaurants": sugg_list
-                    }
-
-                maps_url = self._generate_maps_url(location_order)
-                trans_tips = self._get_transportation_tips(user_budget_value, group_type, transportation_mode)
-
-                itinerary_obj["days"].append({
-                    "day_number": day_num,
-                    "area_focus": area,
-                    "items": day_items,
-                    "meals": meals_block,
-                    "maps_route_url": maps_url,
-                    "transportation_tips": trans_tips
+        itinerary_obj: Dict[str, Any] = {
+            "meta": {
+                "days": days,
+                "budget_value_inr": user_budget_value,
+                "budget_category": user_budget_category,
+                "group_type": group_type,
+                "start_location": start_location,
+                "transportation_mode": transportation_mode,
+                "arrival_area": arrival_area_guess,
+                "osm_ready": osm_ready,
+            },
+            "days": []
+        }
+        self._used_restaurants_global.clear()
+        for i, row in day_rows.iterrows():
+            day_num = i + 1
+            area = row.get("Area Focus", None)
+            spots = self._parse_spots(row.get("Spots (Order & Duration)", ""))
+            location_order = [start_location]
+            spot_coords: List[Tuple[str, Optional[Tuple[float, float]]]] = []
+            day_items: List[Dict[str, Any]] = []
+            for s in spots:
+                nm = s["name"]
+                kind = s["kind"]
+                mins = s["minutes"]
+                location_order.append(nm)
+                place_coord = self._extract_place_coord(nm)
+                spot_coords.append((nm, place_coord))
+                dkm = None
+                if osm_ready:
+                    dkm = self._distance_from_hotel_km(nm, place_coord)
+                if kind == "shopping":
+                    desc, acts, spot = self._safe_info(self.shopping_df, nm, "shopping data")
+                elif kind in ("lunch", "dinner"):
+                    desc, acts, spot = "", "", ""
+                else:
+                    desc, acts, spot = self._safe_info(self.tourist_df, nm, "tourist spot data")
+                day_items.append({
+                    "type": kind,
+                    "spot_type": spot,
+                    "name": nm,
+                    "duration_minutes": mins,
+                    "distance_km_from_hotel": dkm,
+                    "description": desc,
+                    "top_activities": acts
                 })
-
-            return itinerary_obj
-
-def ask_question(prompt: str, valid_options: Optional[List[str]] = None) -> str:
-    while True:
-        try:
-            user_input = input(prompt).strip()
-            if not user_input:
-                continue
-            if valid_options and user_input.title() not in valid_options:
-                print(f"Please enter one of the following: {', '.join(valid_options)}")
-                continue
-            return user_input.title() if valid_options else user_input
-        except Exception as e:
-            print(f"Invalid input. Please try again. ({e})")
-
-def main():
-    generator = KolkataItineraryGenerator(
-        hotels_csv="kolkata_restaurants_hotels.csv",
-        tourist_csv="kolkata_tourist_spots.csv",
-        shopping_csv="shopping.csv",
-        nearby_hotels_csv="hotels_kolkata.csv"   
-    )
-
-    try:
-        days = int(ask_question("Enter duration of your trip: "))
-    except (ValueError, TypeError):
-        print("Invalid number of days. Please enter a number.")
-        return
-
-    try:
-        user_budget_value = int(ask_question("Enter your estimated daily budget (in INR): "))
-    except (ValueError, TypeError):
-        print("Invalid budget. Please enter a number.")
-        return
-
-    group_type = ask_question("Enter group type (Solo / Family / Friends / Couple): ", ["Solo", "Family", "Friends", "Couple"])
-    start_location = ask_question("Enter your starting location (e.g., Hotel, Relatives' House): ")
-
-    travel_mode = ask_question("How are you reaching Kolkata? (Flight / Train / Bus): ", ["Flight", "Train", "Bus"])
-
-    if travel_mode == "Flight":
-        arrival_area = "Dum Dum"
-    elif travel_mode == "Train":
-        station = ask_question("Which station? (Howrah / Sealdah): ", ["Howrah", "Sealdah"])
-        arrival_area = station
-    else:
-        arrival_area = "Esplanade"
-
-    transportation_mode = ask_question("Enter preferred transportation mode (Public Transport / Ride-Hailing / Private Cab): ", ["Public Transport", "Ride-Hailing", "Private Cab"])
-
-    hotel_choice = generator.get_single_hotel_recommendation(user_budget_value, group_type, arrival_area)
-
-    print(f"\n🏨 Recommended Hotel for your stay: {hotel_choice}\n")
-
-    # pass arrival_area so geocoding/hotel selection gets the right hint
-    generator.generate_itinerary(days, user_budget_value, group_type, start_location, transportation_mode, arrival_area=arrival_area)
+            alloc = self._parse_meal_alloc(row.get("Meals Time Allocation", ""))
+            lunch_anchor = spot_coords[len(spot_coords)//2][1] if spot_coords else hotel_coord
+            dinner_anchor = spot_coords[-1][1] if spot_coords else hotel_coord
+            snacks_anchor = lunch_anchor
+            meals_block: Dict[str, Any] = {}
+            for meal_label in ["Breakfast", "Lunch", "Snacks", "Dinner"]:
+                minutes = alloc.get(meal_label, 0)
+                dataset_names = self._suggested_restaurants_for_meal(row, user_budget_category, meal_label)
+                if meal_label == "Breakfast":
+                    anchor = hotel_coord
+                elif meal_label == "Lunch":
+                    anchor = lunch_anchor
+                elif meal_label == "Snacks":
+                    anchor = snacks_anchor
+                else:
+                    anchor = dinner_anchor
+                osm_suggestions = self._find_osm_eateries_near(anchor, OSM_EATERY_SEARCH_RADIUS_M, limit=OSM_EATERY_LIMIT_PER_MEAL)
+                picks_struct: List[Dict[str, Any]] = []
+                seen_local = set()
+                for rname in dataset_names:
+                    key = self._norm(rname)
+                    if not key or key in seen_local or key in self._used_restaurants_global:
+                        continue
+                    rcoord = self._extract_place_coord(rname) 
+                    dkm = self._distance_from_hotel_km(rname, rcoord) if osm_ready else None
+                    picks_struct.append({
+                        "name": rname,
+                    })
+                    seen_local.add(key)
+                    self._used_restaurants_global.add(key)
+                for item in osm_suggestions:
+                    key = self._norm(item["name"])
+                    if not key or key in seen_local or key in self._used_restaurants_global:
+                        continue
+                    picks_struct.append({
+                        "name": item["name"],    
+                    })
+                    seen_local.add(key)
+                    self._used_restaurants_global.add(key)
+                meals_block[meal_label] = {
+                    "allocated_minutes": minutes,
+                    "suggested_restaurants": picks_struct[:OSM_EATERY_LIMIT_PER_MEAL]
+                }
+            maps_url = self._generate_maps_url(location_order)
+            trans_tips = self._get_transportation_tips(user_budget_value, group_type, transportation_mode)
+            itinerary_obj["days"].append({
+                "day_number": day_num,
+                "area_focus": area,
+                "items": day_items,
+                "meals": meals_block,
+                "maps_route_url": maps_url,
+                "transportation_tips": trans_tips
+            })
+        return itinerary_obj
 
 def fetch_itinerary(days, user_budget_value, group_type, arrival, start_location="Hotel") :
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    BASE_DIR=os.path.join (BASE_DIR, "datasets")
     generator = KolkataItineraryGenerator(
         hotels_csv=os.path.join(BASE_DIR, "kolkata_restaurants_hotels.csv"),
         hotel_recommendation_csv=os.path.join(BASE_DIR, "hotels_kolkata.csv"),
@@ -770,7 +819,7 @@ def fetch_itinerary(days, user_budget_value, group_type, arrival, start_location
     transportation_mode = budget_mapping[budget_level]
     hotel_choice = generator.get_single_hotel_recommendation(budget_level, arrival)
 
-    itinerary=generator.generate_itinerary(days, budget_level, user_budget_value, group_type, start_location, transportation_mode, arrival, arrival_area)
+    itinerary=generator.generate_itinerary(days, user_budget_value, group_type, start_location, transportation_mode, arrival_area)
     return {
         "Hotel": hotel_choice,
         "Itinerary": itinerary

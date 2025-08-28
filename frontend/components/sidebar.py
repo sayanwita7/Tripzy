@@ -5,14 +5,38 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def sidebar_nav():
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            background-image:
+                linear-gradient(to bottom, rgba(0,0,0,0.2)0%, rgba(0,0,0,0.75)100%),
+                url("https://res.cloudinary.com/dz3lffkkf/image/upload/v1756372285/pexels-photo-14449828_lzoqnr.jpg");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     LOGOUT_URL = os.getenv("LOGOUT_URL")
     PROFILE_URL=os.getenv("PROFILE_URL")
     username = st.session_state.get("username", "Guest")
-    st.sidebar.image(
-        "https://images.squarespace-cdn.com/content/v1/6782a59d9f2e5a4d12afac77/bb8839f8-a268-42c0-8a9f-37b6e30dc7b7/Logo+final.PNG",
-        use_container_width=True
+    st.sidebar.markdown(
+        """
+        <div style="display: flex; align-items: center;">
+            <img src="https://res.cloudinary.com/dz3lffkkf/image/upload/v1756384962/output-onlinepngtools_p7jlth.png" 
+                style="width: 40px; height: auto; margin-right: 10px;">
+            <img src="https://res.cloudinary.com/dz3lffkkf/image/upload/v1756372700/Logo_final_kalcpz.webp" 
+                style="height: 40px; width: auto;">
+        </div>
+        """,
+        unsafe_allow_html=True
     )
-    st.sidebar.markdown(f"👋 Welcome, {username}")
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"👋 Welcome, {username} !")
     if st.session_state.get("page", "profile") != "profile":
         if st.sidebar.button("👤 Profile", key="profile_btn"):
             try:

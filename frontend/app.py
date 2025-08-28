@@ -14,6 +14,15 @@ if "page" not in st.session_state:
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+st.markdown("""
+        <div class="navbar">
+            <img src="https://res.cloudinary.com/dz3lffkkf/image/upload/v1756384962/output-onlinepngtools_p7jlth.png" 
+                alt="Logo 2" style="height:40px;">
+            <img src="https://res.cloudinary.com/dz3lffkkf/image/upload/v1756372700/Logo_final_kalcpz.webp" 
+                alt="Logo 1" style="height:40px; margin-right: 15px;">
+        </div>
+    """, unsafe_allow_html=True)
+
 if st.session_state.page == "home":
     home.home_page()
 elif st.session_state.page == "login":

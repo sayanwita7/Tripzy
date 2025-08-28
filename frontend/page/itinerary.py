@@ -4,6 +4,19 @@ import time
 import re
 
 def show_loading_screen():
+    st.markdown("""
+    <style>
+        /* Background with darker overlay */
+        [data-testid="stAppViewContainer"] {
+            background-image:
+                linear-gradient(to top, rgba(0,0,0,0.75)50%, rgba(0,0,0,0.75)50%),
+                url("https://res.cloudinary.com/dz3lffkkf/image/upload/v1756371915/kolkata-3331553_1280_nz2mff.jpg");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+    </style>
+    """, unsafe_allow_html=True)
     with st.spinner("Loading your itinerary..."):
         time.sleep(1.5)
 
@@ -16,40 +29,10 @@ def itinerary_page():
         [data-testid="stAppViewContainer"] {
             background-image:
                 linear-gradient(to top, rgba(0,0,0,0.75)50%, rgba(0,0,0,0.75)50%),
-                url("https://skysafar.in/wp-content/uploads/2024/05/Kolkata.png");
+                url("https://res.cloudinary.com/dz3lffkkf/image/upload/v1756371533/photo-1536421469767-80559bb6f5e1_kxx1pt.jpg");
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
-        }
-
-        /* Glassmorphism Itinerary Card */
-        .stItinerary {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.2);
-            font-size: 1rem;
-            line-height: 1.5;
-            color: #fff;
-        }
-
-        /* Subheader Styling */
-        .stSubheader {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #ffcb05; /* bright accent */
-            margin-bottom: 0.75rem;
-        }    
-        .stItinerary ul {
-            margin: 0.3rem 0;
-            padding-left: 1.2rem;
-        }
-        .stItinerary li {
-            margin: 0.2rem 0;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -68,7 +51,7 @@ def itinerary_page():
         hotel_name, details = hotel_line, ""
     st.markdown(f"""
     <div class="stItinerary">
-        <h3 style="margin:0; color:#ffcb05;">🏨 {hotel_name}</h3>
+        <h3 style="margin:0; color:#4da6ff;">🏨 Hotel Recommendation: {hotel_name}</h3>
         <p style="margin:0.5rem 0; color:#eee;">💰 {details}</p>
         {"<p>📍 <a href='"+maps_line+"' target='_blank' style='color:#9cf;'>View on Google Maps</a></p>" if maps_line else ""}
     </div>
@@ -87,12 +70,15 @@ def itinerary_page():
     st.title("📅 Travel Itinerary")
     st.subheader(f"📍 Day {current_day.get('day_number')} – {current_day.get('area_focus', '')}")
     st.markdown("### 🍴 Meals")
-    meal_cols = st.columns(len(current_day["meals"]))
-    for col, (meal_name, meal_info) in zip(meal_cols, current_day["meals"].items()):
+    meal_order = ["Breakfast", "Lunch", "Snacks", "Dinner"]
+    meals = current_day["meals"]
+    ordered_meals = {m: meals[m] for m in meal_order if m in meals}
+    meal_cols = st.columns(len(ordered_meals))
+    for col, (meal_name, meal_info) in zip(meal_cols, ordered_meals.items()):
         with col:
             html = f"""
             <div class="stItinerary">
-                <h4 style="margin:0; color:#ffcb05;">🍽️ {meal_name}</h4>
+                <h4 style="margin:0; color:#4da6ff;">🍽️ {meal_name}</h4>
                 <p style="margin:0.3rem 0; color:#eee;">
                     ⏱ {meal_info.get('allocated_minutes', 'N/A')} mins
                 </p>
@@ -118,13 +104,13 @@ def itinerary_page():
             details_line = " | ".join(details) if details else ""
             html = f"""
             <div class="stItinerary">
-                <h4 style="margin:0; color:#ffcb05;">{item['name']} ({item['type']})</h4>
+                <h4 style="margin:0; color:#4da6ff;">{item['name']} ({item['type']})</h4>
                 {"<p style='margin:0.3rem 0;'>" + details_line + "</p>" if details_line else ""}
             """
             if item.get("description"):
                 html += f"<p style='margin:0.3rem 0; color:#eee;'>{item['description']}</p>"
             if item.get("top_activities"):
-                html += f"<p style='margin:0.3rem 0; color:#ffcb05;'>✨ Activities: {item['top_activities']}</p>"
+                html += f"<p style='margin:0.3rem 0; color:#4da6ff;'>✨ Activities: {item['top_activities']}</p>"
             if item.get("images"):
                 html += "<div style='display:flex; gap:0.5rem; margin-top:0.5rem;'>"
                 for img in item["images"][:5]: 
@@ -133,15 +119,30 @@ def itinerary_page():
             html += "</div>"
             st.markdown(html, unsafe_allow_html=True)
     if current_day.get("maps_route_url"):
-        st.markdown(f"[🗺️ View Route on Google Maps]({current_day['maps_route_url']})")
+        maps_html = f"""
+        <div class="stItinerary">
+            <h4 style="margin:0; color:#4da6ff;">🗺️ Route Map</h4>
+            <p style="margin:0.3rem 0;">
+                <a href="{current_day['maps_route_url']}" target="_blank" style="color:#9cf; text-decoration:none;">
+                    View Route on Google Maps
+                </a>
+            </p>
+        </div>
+        """
+        st.markdown(maps_html, unsafe_allow_html=True)
     if current_day.get("transportation_tips"):
         st.info(current_day["transportation_tips"])
     col1, col2, col3 = st.columns([1, 2, 1])
     with col1:
-        if st.button("⬅️ Previous") and st.session_state.current_day > 0:
-            st.session_state.current_day -= 1
-            st.rerun()
+        if st.session_state.current_day > 0:
+            if st.button("⬅️ Previous"):
+                st.session_state.current_day -= 1
+                st.rerun()
     with col3:
-        if st.button("Next ➡️") and st.session_state.current_day < len(days) - 1:
-            st.session_state.current_day += 1
-            st.rerun()
+        if st.session_state.current_day < len(days) - 1:
+            if st.button("Next ➡️"):
+                st.session_state.current_day += 1
+                st.rerun()
+    if st.button("Back to Home", use_container_width=True):
+        st.session_state.page = "landing"
+        st.rerun()

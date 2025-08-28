@@ -18,108 +18,10 @@ def profile_page():
         [data-testid="stAppViewContainer"] {
             background-image:
                 linear-gradient(to top, rgba(0,0,0,0.75)50%, rgba(0,0,0,0.75)50%),
-                url("https://skysafar.in/wp-content/uploads/2024/05/Kolkata.png");
+                url("https://res.cloudinary.com/dz3lffkkf/image/upload/v1756371262/Itineray_page_img.jpeg_yaszbd.jpg");
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
-        }
-        /* Glassmorphism Itinerary Card */
-        .stItinerary {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.2);
-            font-size: 1rem;
-            line-height: 1.5;
-            color: #fff;
-        }
-        /* Subheader Styling */
-        .stSubheader {
-            font-size: 1.3rem;
-            font-weight: 700;
-            color: #ffcb05; /* bright accent */
-            margin-bottom: 0.75rem;
-        }    
-        .stItinerary ul {
-            margin: 0.3rem 0;
-            padding-left: 1.2rem;
-        }
-        .stItinerary li {
-            margin: 0.2rem 0;
-        }
-                /* Full-width table */
-        .itinerary-table {
-            width: 100%;
-            border-collapse: collapse;
-            color: #fff;
-        }
-
-        .itinerary-table th, .itinerary-table td {
-            border: 1px solid rgba(255,255,255,0.2);
-            padding: 10px;
-            text-align: center;
-        }
-
-        .itinerary-table th {
-            background: rgba(255, 203, 5, 0.2);
-            color: #ffcb05;
-            font-weight: bold;
-        }
-                
-        /* Table Container */
-        .itinerary-table {
-            width: 100%;
-            margin-top: 20px;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-
-        /* Table row styling */
-        .itinerary-row {
-            display: flex;
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-            background: rgba(255,255,255,0.05);
-            transition: 0.3s;
-        }
-        .itinerary-row:hover {
-            background: rgba(255, 203, 5, 0.1);
-        }
-
-        /* Table cell styling */
-        .itinerary-cell {
-            flex: 1;
-            padding: 12px;
-            text-align: center;
-            font-size: 0.95rem;
-            color: #fff;
-        }
-
-        /* Header row */
-        .itinerary-header {
-            display: flex;
-            background: rgba(255, 203, 5, 0.2);
-            font-weight: bold;
-            color: #ffcb05;
-        }
-
-        /* Styled button */
-        div.stButton > button {
-            background: #ffcb05;
-            color: black;
-            font-weight: 600;
-            border-radius: 8px;
-            border: none;
-            padding: 6px 12px;
-            transition: 0.3s;
-        }
-        div.stButton > button:hover {
-            background: #ffdb4d;
-            transform: scale(1.05);
         }
     </style>
     """, unsafe_allow_html=True)
@@ -152,3 +54,9 @@ def profile_page():
                     st.rerun()
                 else:
                     st.error("Failed to fetch itinerary details")
+    else:
+        st.markdown("""
+        <div>
+            <p>No available history!</p>
+        </div>
+        """, unsafe_allow_html=True)

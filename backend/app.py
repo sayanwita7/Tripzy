@@ -18,10 +18,9 @@ db = client[DATABASE_NAME]
 users_col = db["User"]
 itinerary_col = db["Itinerary"]
 saved_col = db["UserItinerary"]
-hotel_col=db["Hotels"]
 app=Flask(__name__)
 app.secret_key="Hello"
-CORS(app)
+CORS(app, supports_credentials=True, origins=["http://localhost:8501"])
 
 
 @app.route("/")
@@ -76,11 +75,10 @@ def logIn():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-
         user = users_col.find_one({"username": username})
         if user:
             if check_password_hash(user['password'], password):
-                session['user'] = user['username']
+                session['username'] = user['username']
                 user_id = str(user['_id'])
                 return jsonify({
                     "message": "Log In successful!",
@@ -106,7 +104,7 @@ def predict():
     budget = data.get('budget')
     grouptype = data.get('grouptype')
     arrival = data.get('arrival')
-    username = session.get('user')
+    username = data.get('username')
     start_location = "Hotel"
     suggestion = itinerary_col.find_one({
         "Duration": duration,
@@ -154,7 +152,6 @@ def predict():
 
 @app.route("/user/history", methods=['POST'])
 def userHistory():
-    # username = session.get('user')
     data = request.get_json()
     username=data.get('username')
     if not username:

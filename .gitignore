@@ -19,6 +19,7 @@ build/
 .vscode/
 .idea/
 .DS_Store
+backend/cache/*.json
 Thumbs.db
 /frontend/venv/
 /backend/venv/
